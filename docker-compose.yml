@@ -1,0 +1,249 @@
+version: '3.9'
+services:
+#
+# NGINX
+#
+  nginx-loadbalancer:
+    image: nginx:1.23.3
+    container_name: nginx_loadbalancer
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    volumes:
+      - ./docker-voldata/loadbalancer:/etc/nginx/
+      - ./docker-voldata/certs/:/certs 
+    depends_on:
+      - 'bind9'
+    networks:
+      backend:
+          ipv4_address: ${BACKEND_LOADBALANCER_IP}
+      frontend:
+          ipv4_address: ${FRONTEND_LOADBALANCER_IP}
+    ports:
+      - '80:80'
+      - '443:443'
+    dns:
+      - ${BACKEND_DNS_IP}
+
+  nginx-server_one:
+    image: nginx:1.23.3
+    container_name: nginx_server_one
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    volumes:
+      - ./docker-voldata/ws1/nginx-config:/etc/nginx/
+      - ./docker-voldata/ws1/nginx:/usr/share/nginx/
+      - ./docker-voldata/certs/:/certs
+    depends_on:
+      - 'nginx-loadbalancer'
+    networks:
+      frontend:
+          ipv4_address: ${WS1_IP}
+    ports:
+      - '80'
+      - '443'
+
+  nginx-server_two:
+    image: nginx:1.23.3
+    container_name: nginx_server_two
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    volumes:
+      - ./docker-voldata/ws2/nginx-config:/etc/nginx/
+      - ./docker-voldata/ws2/nginx:/usr/share/nginx/
+      - ./docker-voldata/certs/:/certs
+    depends_on:
+      - 'nginx-loadbalancer'
+    networks:
+      frontend:
+          ipv4_address: ${WS2_IP}
+    ports:
+      - '80'
+      - '443'
+
+  wordpress:
+    image: wordpress:6.1.1-apache
+    container_name: wordpress
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    volumes:
+      - ./docker-voldata/sftp/users/wordpress/files/wordpress:/var/www/html:rw      
+    env_file:
+      - .env-wp
+    depends_on:
+      - 'mariadb'
+    ports:
+      - '80'
+    networks:
+      frontend:
+        ipv4_address: ${FRONTEND_WP_IP}
+      backend:
+        ipv4_address: ${BACKEND_WP_IP}
+    dns:
+      - ${BACKEND_DNS_IP}
+
+  php:
+    build:
+      context: ./buildfiles
+      dockerfile: Php
+    container_name: php
+    volumes:
+      - ./docker-voldata/ws2/nginx:/usr/share/nginx/
+    networks:
+      frontend:
+        ipv4_address: ${FRONTEND_PHP_IP}
+      backend:
+        ipv4_address: ${BACKEND_PHP_IP}
+    dns:
+      - ${BACKEND_DNS_IP}
+#
+# BIND9
+#
+  bind9:
+    build:
+      context: ./buildfiles
+      dockerfile: Bind9
+    container_name: bind9
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    tty: true
+    volumes:
+      - ./docker-voldata/bind9/:/etc/bind/:ro
+    networks:
+      backend:
+        ipv4_address: ${BACKEND_DNS_IP}
+      frontend:
+        ipv4_address: ${FRONTEND_DNS_IP}
+    ports:
+      - '53'
+    dns:
+      - ${BACKEND_DNS_IP}
+#
+# PORTAINER
+#
+  portainer:
+    image: portainer/portainer-ce:2.17.0
+    container_name: portainer
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker-voldata/portainer:/data
+    networks:
+      backend:
+        ipv4_address: ${PORTAINER_IP}
+    ports:
+      - '9000:9000'
+    dns:
+      - ${BACKEND_DNS_IP}
+#
+# PHPMYADMIN
+#
+  phpmyadmin:
+    image: phpmyadmin:5.2.1-apache
+    container_name: phpmyadmin
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    env_file:
+      - .env-db
+    networks:
+      backend:
+        ipv4_address: ${PMA_IP}
+    ports:
+      - "80"
+    dns:
+      - ${BACKEND_DNS_IP}
+#
+# MARIADB
+#
+  mariadb:
+    image: mariadb:10.8.4
+    container_name: mariadb
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    volumes:
+      - ./docker-voldata/mariadb:/var/lib/mysql
+    env_file:
+      - .env-db
+    networks:
+      backend:
+        ipv4_address: ${DB_IP}
+    ports:
+      - '3306'
+    dns:
+      - ${BACKEND_DNS_IP}
+#
+# SFTP
+#
+  sftp:
+    image: "emberstack/sftp"
+    container_name: sftp
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    volumes:
+      - ./docker-voldata/sftp/sftp.json:/app/config/sftp.json:ro
+      - ./docker-voldata/sftp/users:/home/
+    ports:
+      - "22:22"
+      - "21"
+    networks:
+      backend:
+        ipv4_address: ${SFTP_IP}
+    dns:
+      - ${BACKEND_DNS_IP}
+#
+# NETWORKS
+#
+networks:
+  frontend:
+    name: frontend_network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.168.10.0/24
+
+  backend:
+    name: backend_network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.168.20.0/24
+

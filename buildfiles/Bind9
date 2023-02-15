@@ -1,0 +1,7 @@
+# Check on UFW later
+# Change to debian?
+
+FROM ubuntu:22.04
+RUN /bin/bash -c 'apt update && apt install -y net-tools iputils-ping bind9 dnsutils'
+
+CMD service named start && bash
